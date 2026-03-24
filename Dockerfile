@@ -57,12 +57,6 @@ RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /home/$USERNAME/.bashrc
 
 RUN apt-get update \
     && apt install -y ros-$ROS_DISTRO-cartographer \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# ========== 以下为修改的 librealsense 安装部分 ==========
-# 安装 librealsense 编译依赖（增加 v4l-utils）
-RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     libusb-1.0-0-dev \
     libudev-dev \
@@ -77,46 +71,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa-dev \
     v4l-utils \
     udev \
+    usbutils \
+    python3.12-full \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 克隆 librealsense 源码（使用稳定版本 v2.54.2）
 RUN git clone https://github.com/IntelRealSense/librealsense.git /opt/librealsense \
     && cd /opt/librealsense \
-    && git checkout v2.57.6
-
-# 设置 udev 规则（使普通用户能访问 USB 设备）
-RUN cd /opt/librealsense && ./scripts/setup_udev_rules.sh
-
-# 将非 root 用户加入 video 组，确保 USB 访问权限
-RUN usermod -aG video $USERNAME
-
-# 编译安装（使用 libuvc 后端，无需内核补丁）
-RUN cd /opt/librealsense \
+    && git checkout v2.57.6 \
     && mkdir -p build && cd build \
     && cmake ../ \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_EXAMPLES=false \
         -DBUILD_GRAPHICAL_EXAMPLES=false \
         -DFORCE_RSUSB_BACKEND=true \
+        -DBUILD_PYTHON_BINDINGS:bool=true \
+        -DPYTHON_EXECUTABLE=/usr/bin/python3.12 \
     && make -j$(nproc) \
     && make install \
-    && ldconfig
+    && ldconfig \
+    && find . -maxdepth 2 -name "pyrealsense2*.so" -exec cp {} /opt/pyrealsense2.so \; \
+    && ls -la /opt/pyrealsense2.so \
+    && rm -rf /opt/librealsense
 
-# 清理源码，减小镜像体积
-RUN rm -rf /opt/librealsense
+RUN python3.12 -m venv /venv \
+    && cp /opt/pyrealsense2.so /venv/lib/python3.12/site-packages/pyrealsense2.so
 
-# 添加库路径（避免警告，直接赋值）
+ENV PATH="/venv/bin:$PATH"
 ENV LD_LIBRARY_PATH=/usr/local/lib
-# ========== librealsense 安装部分结束 ==========
 
-# 更改工作目录所有权
+
+# env begin
+
+# env end
+
+
+
 RUN chown -R $USERNAME:$USERNAME /home/$USERNAME
 
-# 切换到非root用户
-USER $USERNAME
-
-# 设置默认shell
 SHELL ["/bin/bash", "-c"]
 
-# 默认启动bash
 CMD ["/bin/bash"]
